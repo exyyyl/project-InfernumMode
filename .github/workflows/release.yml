@@ -36,6 +36,9 @@ jobs:
           Write-Host "Extracting to $tMLDir..."
           Expand-Archive -Path "tModLoader.zip" -DestinationPath $tMLDir -Force
           
+          Write-Host "Listing files in $tMLDir for debugging:"
+          Get-ChildItem -Path $tMLDir -Recurse | Select-Object FullName
+          
           $targetsFile = Get-ChildItem -Path $tMLDir -Filter "tModLoader.targets" -Recurse | Select-Object -First 1
           if ($null -eq $targetsFile) {
               throw "Could not find tModLoader.targets in the downloaded archive."
