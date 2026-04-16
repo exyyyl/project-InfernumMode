@@ -23,14 +23,27 @@ jobs:
       - name: Download and Setup tModLoader
         shell: pwsh
         run: |
-          # Create tModLoader directory in parent of workspace
-          New-Item -ItemType Directory -Path "../tModLoader" -Force
-          # Download latest tModLoader release
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $parentDir = Split-Path -Path $repoRoot -Parent
+          $tMLDir = Join-Path -Path $parentDir -ChildPath "tModLoader"
+          
+          Write-Host "Creating tModLoader directory at $tMLDir"
+          New-Item -ItemType Directory -Path $tMLDir -Force
+          
+          Write-Host "Downloading tModLoader..."
           Invoke-WebRequest -Uri "https://github.com/tModLoader/tModLoader/releases/latest/download/tModLoader.zip" -OutFile "tModLoader.zip"
-          # Extract to the directory
-          Expand-Archive -Path "tModLoader.zip" -DestinationPath "../tModLoader" -Force
-          # Ensure tModLoader.targets is exactly where the csproj expects it (..\tModLoader.targets)
-          Copy-Item "../tModLoader/tModLoader.targets" "../tModLoader.targets" -Force
+          
+          Write-Host "Extracting to $tMLDir..."
+          Expand-Archive -Path "tModLoader.zip" -DestinationPath $tMLDir -Force
+          
+          $targetsFile = Get-ChildItem -Path $tMLDir -Filter "tModLoader.targets" -Recurse | Select-Object -First 1
+          if ($null -eq $targetsFile) {
+              throw "Could not find tModLoader.targets in the downloaded archive."
+          }
+          
+          $destination = Join-Path -Path $parentDir -ChildPath "tModLoader.targets"
+          Copy-Item -Path $targetsFile.FullName -Destination $destination -Force
+          Write-Host "Successfully placed tModLoader.targets at $destination"
 
       - name: Build Mod
         run: dotnet build -c Release -p:ModOutputPath="${{ github.workspace }}/artifacts"
