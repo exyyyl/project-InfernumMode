@@ -31,29 +31,45 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/tModLoader/tModLoader/releases/latest/download/tModLoader.zip" -OutFile "tModLoader.zip"
           Expand-Archive -Path "tModLoader.zip" -DestinationPath $tMLDir -Force
           
-          Write-Host "--- DETAILED FILE LIST ---"
-          Get-ChildItem -Path $tMLDir -Recurse | Where-Object { $_.Extension -eq ".dll" -or $_.Name -like "*targets" } | Select-Object -ExpandProperty FullName
-          Write-Host "--- END ---"
+          # Generate a dynamic tModLoader.targets file
+          $targetsPath = Join-Path -Path $parentDir -ChildPath "tModLoader.targets"
+          $dlls = Get-ChildItem -Path $tMLDir -Filter "*.dll" -Recurse
           
-          $tMLDll = Get-ChildItem -Path $tMLDir -Filter "tModLoader.dll" -Recurse | Select-Object -First 1
-          if ($null -eq $tMLDll) {
-              throw "Could not find tModLoader.dll in downloaded archive."
+          $targetsContent = @"
+          <Project>
+            <ItemGroup>
+          "@
+          
+          foreach ($dll in $dlls) {
+              $name = [System.IO.Path]::GetFileNameWithoutExtension($dll.Name)
+              # Skip duplicates or common system libs if needed, but for now include all
+              $targetsContent += "`n    <Reference Include=""$name"">`n      <HintPath>$($dll.FullName)</HintPath>`n    </Reference>"
           }
-          echo "TML_DLL_PATH=$($tMLDll.FullName)" >> $env:GITHUB_ENV
+          
+          $targetsContent += "`n  </ItemGroup>`n</Project>"
+          Set-Content -Path $targetsPath -Value $targetsContent
+          Write-Host "Generated dynamic tModLoader.targets at $targetsPath"
 
       - name: Build Mod
         shell: pwsh
         run: |
           $repoRoot = $env:GITHUB_WORKSPACE
-          $tmlDll = $env:TML_DLL_PATH
-          
-          # Create builds folder
           $buildDir = Join-Path -Path $repoRoot -ChildPath "artifacts"
           New-Item -ItemType Directory -Path $buildDir -Force
           
-          # We will try a different build approach depending on what we find in the logs
-          Write-Host "Starting build process..."
-          dotnet build $repoRoot -c Release -p:ModOutputPath=$buildDir
+          Write-Host "Building project..."
+          dotnet build $repoRoot -c Release
+          
+          # The packaging into .tmod usually needs tML targets. 
+          # If it doesn't happen, we'll manually package in the next iteration.
+          # For now, let's see if the DLL builds.
+          
+          # Find the built DLL and put it in artifacts
+          $builtDll = Get-ChildItem -Path $repoRoot -Filter "InfernumMode.dll" -Recurse | Where-Object { $_.FullName -like "*bin\Release*" } | Select-Object -First 1
+          if ($null -ne $builtDll) {
+              Copy-Item -Path $builtDll.FullName -Destination $buildDir -Force
+              Write-Host "Captured built DLL at $($builtDll.FullName)"
+          }
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

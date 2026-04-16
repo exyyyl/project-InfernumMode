@@ -5,6 +5,7 @@
 
 	<!-- General -->
 	<PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
     <AssemblyName>InfernumMode</AssemblyName>
 	  <LangVersion>preview</LangVersion>
 	  <Nullable>enable</Nullable>
