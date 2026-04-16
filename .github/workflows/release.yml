@@ -1,0 +1,44 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Download and Setup tModLoader
+        shell: pwsh
+        run: |
+          # Create tModLoader directory in parent of workspace
+          New-Item -ItemType Directory -Path "../tModLoader" -Force
+          # Download latest tModLoader release
+          Invoke-WebRequest -Uri "https://github.com/tModLoader/tModLoader/releases/latest/download/tModLoader.zip" -OutFile "tModLoader.zip"
+          # Extract to the directory
+          Expand-Archive -Path "tModLoader.zip" -DestinationPath "../tModLoader" -Force
+          # Ensure tModLoader.targets is exactly where the csproj expects it (..\tModLoader.targets)
+          Copy-Item "../tModLoader/tModLoader.targets" "../tModLoader.targets" -Force
+
+      - name: Build Mod
+        run: dotnet build -c Release -p:ModOutputPath="${{ github.workspace }}/artifacts"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.tmod
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
