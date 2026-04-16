@@ -36,20 +36,42 @@ jobs:
           Write-Host "Extracting to $tMLDir..."
           Expand-Archive -Path "tModLoader.zip" -DestinationPath $tMLDir -Force
           
-          Write-Host "Listing files in $tMLDir for debugging:"
-          Get-ChildItem -Path $tMLDir -Recurse | Select-Object FullName
-          
-          $targetsFile = Get-ChildItem -Path $tMLDir -Filter "tModLoader.targets" -Recurse | Select-Object -First 1
-          if ($null -eq $targetsFile) {
-              throw "Could not find tModLoader.targets in the downloaded archive."
+          $tMLDll = Get-ChildItem -Path $tMLDir -Filter "tModLoader.dll" -Recurse | Select-Object -First 1
+          if ($null -eq $tMLDll) {
+              throw "Could not find tModLoader.dll in downloaded archive."
           }
-          
-          $destination = Join-Path -Path $parentDir -ChildPath "tModLoader.targets"
-          Copy-Item -Path $targetsFile.FullName -Destination $destination -Force
-          Write-Host "Successfully placed tModLoader.targets at $destination"
+          Write-Host "Found tModLoader.dll at $($tMLDll.FullName)"
+          echo "TML_DLL_PATH=$($tMLDll.FullName)" >> $env:GITHUB_ENV
 
       - name: Build Mod
-        run: dotnet build -c Release -p:ModOutputPath="${{ github.workspace }}/artifacts"
+        shell: pwsh
+        run: |
+          $repoRoot = $env:GITHUB_WORKSPACE
+          $tmlDll = $env:TML_DLL_PATH
+          
+          Write-Host "Building mod using tModLoader CLI..."
+          # The -build command compiles and packages the mod into the default Mods folder
+          dotnet $tmlDll -build $repoRoot -breakonerror
+          
+          # tModLoader builds to Documents/My Games/Terraria/tModLoader/Mods by default
+          $defaultModsDir = Join-Path $HOME "Documents\My Games\Terraria\tModLoader\Mods"
+          $buildDir = Join-Path $repoRoot "artifacts"
+          New-Item -ItemType Directory -Path $buildDir -Force
+          
+          Write-Host "Searching for built mod in $defaultModsDir..."
+          $modFile = Get-ChildItem -Path $defaultModsDir -Filter "InfernumMode.tmod" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          
+          if ($null -eq $modFile) {
+              Write-Warning "Could not find built mod in default directory. Searching workspace..."
+              $modFile = Get-ChildItem -Path $repoRoot -Filter "*.tmod" -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          }
+          
+          if ($null -eq $modFile) {
+              throw "Build failed: .tmod file not found!"
+          }
+          
+          Write-Host "Found mod at $($modFile.FullName). Moving to artifacts..."
+          Move-Item -Path $modFile.FullName -Destination (Join-Path $buildDir "InfernumMode.tmod") -Force
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
