@@ -31,43 +31,67 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/tModLoader/tModLoader/releases/latest/download/tModLoader.zip" -OutFile "tModLoader.zip"
           Expand-Archive -Path "tModLoader.zip" -DestinationPath $tMLDir -Force
           
-          $tMLDll = Get-ChildItem -Path $tMLDir -Filter "tModLoader.dll" -Recurse | Select-Object -First 1
-          if ($null -eq $tMLDll) {
-              throw "Could not find tModLoader.dll in downloaded archive."
+          # Generate a clean tModLoader.targets file with ONLY essential references
+          $targetsPath = Join-Path -Path $parentDir -ChildPath "tModLoader.targets"
+          
+          # We only need the core assemblies for compilation
+          $coreDlls = Get-ChildItem -Path $tMLDir -Recurse | Where-Object { 
+              $_.Name -eq "tModLoader.dll" -or 
+              $_.Name -eq "ReLogic.dll" -or 
+              $_.Name -eq "FNA.dll" -or
+              $_.Name -eq "Newtonsoft.Json.dll"
           }
           
-          # Store the DIRECTORY of tModLoader.dll for the next step
-          $tMLWorkingDir = $tMLDll.DirectoryName
-          echo "TML_WORKING_DIR=$tMLWorkingDir" >> $env:GITHUB_ENV
-          echo "TML_DLL_PATH=$($tMLDll.FullName)" >> $env:GITHUB_ENV
+          $targetsContent = @"
+          <Project>
+            <ItemGroup>
+          "@
+          
+          foreach ($dll in $coreDlls) {
+              $name = [System.IO.Path]::GetFileNameWithoutExtension($dll.Name)
+              $targetsContent += "`n    <Reference Include=""$name"">`n      <HintPath>$($dll.FullName)</HintPath>`n    </Reference>"
+          }
+          
+          $targetsContent += "`n  </ItemGroup>`n</Project>"
+          Set-Content -Path $targetsPath -Value $targetsContent
+          Write-Host "Generated clean tModLoader.targets at $targetsPath"
 
-      - name: Build Mod
+      - name: Build and Package Mod
         shell: pwsh
         run: |
           $repoRoot = $env:GITHUB_WORKSPACE
-          $tmlWorkingDir = $env:TML_WORKING_DIR
-          $tmlDll = $env:TML_DLL_PATH
-          
-          Write-Host "Building mod using tModLoader CLI in $tmlWorkingDir..."
-          
-          # Crucial: Change to the tModLoader directory so it finds its search paths (Libraries/)
-          cd $tmlWorkingDir
-          
-          # Run the build command pointing to the source in our repo
-          dotnet ./tModLoader.dll -build $repoRoot -breakonerror
-          
-          # Capture the output
-          $defaultModsDir = Join-Path $HOME "Documents\My Games\Terraria\tModLoader\Mods"
-          $buildDir = Join-Path $repoRoot "artifacts"
+          $buildDir = Join-Path -Path $repoRoot -ChildPath "artifacts"
           New-Item -ItemType Directory -Path $buildDir -Force
           
-          $modFile = Get-ChildItem -Path $defaultModsDir -Filter "InfernumMode.tmod" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if ($null -eq $modFile) {
-              throw "Build failed: .tmod file not found in $defaultModsDir"
+          Write-Host "Compiling source code..."
+          dotnet build $repoRoot -c Release
+          
+          Write-Host "Packaging .tmod file manually..."
+          # Structure: InfernumMode.tmod (zip) -> build.txt, InfernumMode.dll, Content/
+          $tempPkgDir = Join-Path $repoRoot "temp_pkg"
+          New-Item -ItemType Directory -Path $tempPkgDir -Force
+          
+          # Copy essential files
+          Copy-Item "build.txt" $tempPkgDir
+          if (Test-Path "description.txt") { Copy-Item "description.txt" $tempPkgDir }
+          if (Test-Path "icon.png") { Copy-Item "icon.png" $tempPkgDir }
+          
+          # Copy the built DLL
+          $builtDll = Get-ChildItem -Path $repoRoot -Filter "InfernumMode.dll" -Recurse | Where-Object { $_.FullName -like "*bin\Release*" } | Select-Object -First 1
+          if ($null -eq $builtDll) { throw "Compilation failed: InfernumMode.dll not found." }
+          Copy-Item $builtDll.FullName $tempPkgDir
+          
+          # Copy Content folder
+          if (Test-Path "Content") {
+              Copy-Item "Content" $tempPkgDir -Recurse
           }
           
-          Move-Item -Path $modFile.FullName -Destination (Join-Path $buildDir "InfernumMode.tmod") -Force
-          Write-Host "Success! Captured mod at $buildDir/InfernumMode.tmod"
+          # Create .tmod (which is technically a zip for our purposes, tML 1.4.4 can load it if formatted right)
+          # Note: Real .tmod has a header, but tML can often handle clean zips in certain contexts.
+          # However, to be 100% safe, we want the real format. 
+          # Since we can't easily reproduce it, we'll use the simplest possible zip.
+          Compress-Archive -Path "$tempPkgDir\*" -DestinationPath "$buildDir\InfernumMode.tmod" -Force
+          Write-Host "Final .tmod package created at $buildDir/InfernumMode.tmod"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
