@@ -1,6 +1,6 @@
-author = Lucille Karma
+author = exyyyl
 version = 2.0.1.29
-displayName = Calamity Mod Infernum Mode
+displayName = Calamity Infernum Mode fix exyyyl 1.0.0.0
 modReferences = CalamityMod, SubworldLibrary, Luminance
 hideCode = false
 hideResources = false
